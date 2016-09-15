@@ -1,0 +1,56 @@
+#version 440
+
+#define BLOCK_SIZE 16
+
+layout(location = 0) uniform uint matrixSize; // pass the size of the matrix via this constant
+
+// make blocksize take up all shared memory
+shared int matrix1[BLOCK_SIZE][BLOCK_SIZE], matrix2[BLOCK_SIZE][BLOCK_SIZE];
+
+layout(std430, binding = 0) readonly buffer Input
+{
+	int dataMatrix1[];
+};
+
+layout(std430, binding = 1) readonly buffer Input2
+{
+    int dataMatrix2[];
+};
+
+layout(std430, binding = 2) writeonly buffer Output
+{
+    int sumData[];
+};
+
+layout(local_size_x = BLOCK_SIZE, local_size_y = BLOCK_SIZE, local_size_z = 1) in;
+
+void main()
+{
+    // load data into groupshared
+    uint x = gl_WorkGroupID.x * BLOCK_SIZE + gl_LocalInvocationID.x;
+    uint y = gl_WorkGroupID.y * BLOCK_SIZE + gl_LocalInvocationID.y;
+
+    // sum is accumulated in this variable
+    int sum = 0;
+
+    // divide up the data
+    for (int i = 0; i < matrixSize / BLOCK_SIZE; i++)
+    {
+        // load to groupshared
+        matrix1[gl_LocalInvocationID.y][gl_LocalInvocationID.x] = dataMatrix1[y * matrixSize + (gl_LocalInvocationID.x + i * BLOCK_SIZE)];
+        matrix2[gl_LocalInvocationID.y][gl_LocalInvocationID.x] = dataMatrix2[x + (gl_LocalInvocationID.y + i * BLOCK_SIZE) * matrixSize];
+
+        // group sync
+        barrier();
+
+        // sum up the values
+        for (int j = 0; j < BLOCK_SIZE; j++)
+            sum += matrix1[gl_LocalInvocationID.y][j] * matrix2[j][gl_LocalInvocationID.x];
+
+        // group sync
+        barrier();
+    }
+
+    // write the output
+    sumData[y * matrixSize + x] = sum;
+}
